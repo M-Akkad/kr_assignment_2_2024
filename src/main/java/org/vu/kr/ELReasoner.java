@@ -2,33 +2,40 @@ package org.vu.kr;
 
 import org.semanticweb.owlapi.apibinding.OWLManager;
 import org.semanticweb.owlapi.model.*;
+import org.semanticweb.owlapi.model.parameters.Imports;
 
 import java.io.File;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 
 public class ELReasoner {
     final OWLOntology ontology;
     private final Map<OWLClass, Set<OWLClass>> subsumers;
     private final OWLDataFactory factory;
 
-    public ELReasoner(String ontologyFile) throws OWLOntologyCreationException {
+    public ELReasoner(String ontologyFilePath) throws OWLOntologyCreationException {
         OWLOntologyManager manager = OWLManager.createOWLOntologyManager();
-        this.ontology = manager.loadOntologyFromOntologyDocument(new File(ontologyFile));
+        File ontologyFile = new File(ontologyFilePath);
+
+        if (!ontologyFile.exists()) {
+            throw new IllegalArgumentException("Ontology file not found: " + ontologyFilePath);
+        }
+
+        this.ontology = manager.loadOntologyFromOntologyDocument(ontologyFile);
         this.factory = manager.getOWLDataFactory();
         this.subsumers = new HashMap<>();
+
         initializeSubsumers();
     }
 
     private void initializeSubsumers() {
         OWLClass owlThing = factory.getOWLThing();
-        for (OWLClass cls : ontology.getClassesInSignature()) {
-            Set<OWLClass> subsumerSet = new HashSet<>();
-            subsumerSet.add(cls);
-            subsumerSet.add(owlThing);
-            subsumers.put(cls, subsumerSet);
+        for (OWLClass cls : ontology.getClassesInSignature(Imports.INCLUDED)) {
+            if (!cls.isAnonymous()) {
+                Set<OWLClass> subsumerSet = new HashSet<>();
+                subsumerSet.add(cls);
+                subsumerSet.add(owlThing);
+                subsumers.put(cls, subsumerSet);
+            }
         }
     }
 
@@ -58,15 +65,32 @@ public class ELReasoner {
 
     private boolean applyConjunctionRule() {
         boolean changed = false;
-        for (OWLAxiom axiom : ontology.getAxioms()) {
+        for (OWLAxiom axiom : ontology.getAxioms(Imports.INCLUDED)) {
             if (axiom instanceof OWLSubClassOfAxiom) {
                 OWLSubClassOfAxiom subClassAxiom = (OWLSubClassOfAxiom) axiom;
-                if (subClassAxiom.getSuperClass() instanceof OWLObjectIntersectionOf) {
-                    OWLClass subClass = subClassAxiom.getSubClass().asOWLClass();
-                    OWLObjectIntersectionOf intersection = (OWLObjectIntersectionOf) subClassAxiom.getSuperClass();
-                    for (OWLClassExpression conjunct : intersection.getOperands()) {
-                        if (conjunct instanceof OWLClass) {
-                            changed |= subsumers.get(subClass).add((OWLClass) conjunct);
+                OWLClassExpression subClassExpression = subClassAxiom.getSubClass();
+                OWLClassExpression superClassExpression = subClassAxiom.getSuperClass();
+
+                if (subClassExpression instanceof OWLClass) {
+                    OWLClass subClass = (OWLClass) subClassExpression;
+
+                    // Handle OWLObjectIntersectionOf
+                    if (superClassExpression instanceof OWLObjectIntersectionOf) {
+                        OWLObjectIntersectionOf intersection = (OWLObjectIntersectionOf) superClassExpression;
+                        for (OWLClassExpression operand : intersection.getOperands()) {
+                            if (operand instanceof OWLClass) {
+                                changed |= subsumers.get(subClass).add((OWLClass) operand);
+                            }
+                        }
+                    }
+
+                    // Handle OWLObjectUnionOf
+                    if (superClassExpression instanceof OWLObjectUnionOf) {
+                        OWLObjectUnionOf union = (OWLObjectUnionOf) superClassExpression;
+                        for (OWLClassExpression operand : union.getOperands()) {
+                            if (operand instanceof OWLClass) {
+                                changed |= subsumers.get(subClass).add((OWLClass) operand);
+                            }
                         }
                     }
                 }
@@ -75,9 +99,10 @@ public class ELReasoner {
         return changed;
     }
 
+
     private boolean applyExistentialRule() {
         boolean changed = false;
-        for (OWLAxiom axiom : ontology.getAxioms()) {
+        for (OWLAxiom axiom : ontology.getAxioms(Imports.INCLUDED)) {
             if (axiom instanceof OWLSubClassOfAxiom) {
                 OWLSubClassOfAxiom subClassAxiom = (OWLSubClassOfAxiom) axiom;
                 if (subClassAxiom.getSubClass() instanceof OWLClass &&
@@ -96,30 +121,5 @@ public class ELReasoner {
 
     public Set<OWLClass> getSubsumers(OWLClass cls) {
         return new HashSet<>(subsumers.getOrDefault(cls, new HashSet<>()));
-    }
-
-    // Main method for testing
-    public static void main(String[] args) {
-        try {
-            // Replace with your ontology file path
-            String ontologyFile = "path/to/your/ontology.owl";
-            ELReasoner reasoner = new ELReasoner(ontologyFile);
-
-            // Compute all subsumption relationships
-            reasoner.computeSubsumers();
-
-            // Get and print subsumers for a specific class
-            OWLDataFactory factory = OWLManager.createOWLOntologyManager().getOWLDataFactory();
-            OWLClass testClass = factory.getOWLClass(IRI.create("http://example.org/ontology#YourClassName"));
-
-            Set<OWLClass> subsumers = reasoner.getSubsumers(testClass);
-            System.out.println("Subsumers:");
-            for (OWLClass subsumer : subsumers) {
-                System.out.println(subsumer.getIRI().getShortForm());
-            }
-
-        } catch (OWLOntologyCreationException e) {
-            e.printStackTrace();
-        }
     }
 }
