@@ -83,22 +83,11 @@ public class ELReasoner {
                             }
                         }
                     }
-
-                    // Handle OWLObjectUnionOf
-                    if (superClassExpression instanceof OWLObjectUnionOf) {
-                        OWLObjectUnionOf union = (OWLObjectUnionOf) superClassExpression;
-                        for (OWLClassExpression operand : union.getOperands()) {
-                            if (operand instanceof OWLClass) {
-                                changed |= subsumers.get(subClass).add((OWLClass) operand);
-                            }
-                        }
-                    }
                 }
             }
         }
         return changed;
     }
-
 
     private boolean applyExistentialRule() {
         boolean changed = false;
@@ -117,6 +106,15 @@ public class ELReasoner {
             }
         }
         return changed;
+    }
+
+    public String getClassLabel(OWLClass cls) {
+        for (OWLAnnotationAssertionAxiom annotation : ontology.getAnnotationAssertionAxioms(cls.getIRI())) {
+            if (annotation.getProperty().isLabel() && annotation.getValue() instanceof OWLLiteral) {
+                return ((OWLLiteral) annotation.getValue()).getLiteral();
+            }
+        }
+        return cls.getIRI().getShortForm();
     }
 
     public Set<OWLClass> getSubsumers(OWLClass cls) {
